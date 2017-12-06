@@ -1,4 +1,6 @@
-/* Copyright (c) 2012-2017 LevelDOWN contributors
+#if defined(JS_ENGINE_V8) or defined(JS_ENGINE_MOZJS) or \
+    defined(JS_ENGINE_CHAKRA)
+/* Copyright (c) 2012-2015 LevelDOWN contributors
  * See list at <https://github.com/level/leveldown#contributing>
  * MIT License <https://github.com/level/leveldown/blob/master/LICENSE.md>
  */
@@ -7,39 +9,33 @@
 #define LD_LEVELDOWN_ASYNC_H
 
 #include <node.h>
-
 #include "async.h"
 
 namespace leveldown {
 
 class DestroyWorker : public AsyncWorker {
-public:
-  DestroyWorker (
-      Nan::Utf8String* location
-    , Nan::Callback *callback
-  );
+ public:
+  DestroyWorker(jxcore::JXString &location, NanCallback *callback);
 
-  virtual ~DestroyWorker ();
-  virtual void Execute ();
+  virtual ~DestroyWorker();
+  virtual void Execute();
 
-private:
-  Nan::Utf8String* location;
+ private:
+  jxcore::JXString location;
 };
 
 class RepairWorker : public AsyncWorker {
-public:
-  RepairWorker (
-      Nan::Utf8String* location
-    , Nan::Callback *callback
-  );
+ public:
+  RepairWorker(jxcore::JXString &location, NanCallback *callback);
 
-  virtual ~RepairWorker ();
-  virtual void Execute ();
+  virtual ~RepairWorker();
+  virtual void Execute();
 
-private:
-  Nan::Utf8String* location;
+ private:
+  jxcore::JXString location;
 };
 
-} // namespace leveldown
+}  // namespace leveldown
 
+#endif
 #endif

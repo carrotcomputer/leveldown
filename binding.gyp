@@ -15,35 +15,18 @@
                   }
               }
           }]
-        , ['OS == "linux"', {
-              'cflags': [
-              ]
-            , 'cflags!': [ '-fno-tree-vrp']
+        , ['OS in "linux android mac ios"', {
+            'cflags': ['-std=c++0x'],
+            'cflags!': [ '-fno-tree-vrp' ],
+            'xcode_settings': {
+              'OTHER_CPLUSPLUSFLAGS': ['-std=c++11', '-stdlib=libstdc++']
+            }
           }]
-        , ['OS == "android"', {
-              'cflags': [ '-fPIC' ]
-            , 'ldflags': [ '-fPIC' ]
-            , 'cflags!': [
-                  '-fno-tree-vrp'
-                , '-fno-exceptions'
-                , '-mfloat-abi=hard'
-                , '-fPIE'
-              ]
-            , 'cflags_cc!': [ '-fno-exceptions' ]
-            , 'ldflags!': [ '-fPIE' ]
-          }]
-        , ['target_arch == "arm"', {
-              'cflags': [ '-mfloat-abi=hard'
-              ]
-          }]
-        ]
-      , "dependencies": [
+        ],
+        "dependencies": [
             "<(module_root_dir)/deps/leveldb/leveldb.gyp:leveldb"
-        ]
-      , "include_dirs"  : [
-            "<!(node -e \"require('nan')\")"
-        ]
-      , "sources": [
+        ],
+       "sources": [
             "src/batch.cc"
           , "src/batch_async.cc"
           , "src/database.cc"

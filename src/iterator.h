@@ -1,4 +1,6 @@
-/* Copyright (c) 2012-2017 LevelDOWN contributors
+#if defined(JS_ENGINE_V8) or defined(JS_ENGINE_MOZJS) or \
+    defined(JS_ENGINE_CHAKRA)
+/* Copyright (c) 2012-2015 LevelDOWN contributors
  * See list at <https://github.com/level/leveldown#contributing>
  * MIT License <https://github.com/level/leveldown/blob/master/LICENSE.md>
  */
@@ -8,63 +10,56 @@
 
 #include <node.h>
 #include <vector>
-#include <nan.h>
+#include "nan.h"
 
 #include "leveldown.h"
 #include "database.h"
 #include "async.h"
+#include "jx_persistent_store.h"
 
 namespace leveldown {
 
 class Database;
 class AsyncWorker;
 
-class Iterator : public Nan::ObjectWrap {
-public:
-  static void Init ();
-  static v8::Local<v8::Object> NewInstance (
-      v8::Local<v8::Object> database
-    , v8::Local<v8::Number> id
-    , v8::Local<v8::Object> optionsObj
-  );
+class Iterator : public node::ObjectWrap {
+ public:
+  static jxcore::ThreadStore<JS_PERSISTENT_FUNCTION_TEMPLATE> jx_persistent;
 
-  Iterator (
-      Database* database
-    , uint32_t id
-    , leveldb::Slice* start
-    , std::string* end
-    , bool reverse
-    , bool keys
-    , bool values
-    , int limit
-    , std::string* lt
-    , std::string* lte
-    , std::string* gt
-    , std::string* gte
-    , bool fillCache
-    , bool keyAsBuffer
-    , bool valueAsBuffer
-    , size_t highWaterMark
-  );
+  INIT_NAMED_CLASS_MEMBERS(Iterator, Iterator) {
+    int id = com->threadId;
+    JS_NEW_PERSISTENT_FUNCTION_TEMPLATE(jx_persistent.templates[id],
+                                        constructor);
 
-  ~Iterator ();
+    SET_INSTANCE_METHOD("next", Iterator::Next, 0);
+    SET_INSTANCE_METHOD("end", Iterator::End, 0);
+  }
+  END_INIT_NAMED_MEMBERS(Iterator)
 
-  bool IteratorNext (std::vector<std::pair<std::string, std::string> >& result);
-  leveldb::Status IteratorStatus ();
-  void IteratorEnd ();
-  void Release ();
-  void ReleaseTarget ();
+  static JS_LOCAL_OBJECT NewInstance(JS_LOCAL_OBJECT database,
+                                     JS_LOCAL_VALUE id,
+                                     JS_LOCAL_OBJECT optionsObj);
 
-private:
+  Iterator(Database* database, uint32_t id, leveldb::Slice* start,
+           std::string* end, bool reverse, bool keys, bool values, int limit,
+           std::string* lt, std::string* lte, std::string* gt, std::string* gte,
+           bool fillCache, bool keyAsBuffer, bool valueAsBuffer,
+           JS_LOCAL_OBJECT& startHandle, size_t highWaterMark);
+
+  ~Iterator();
+
+  bool IteratorNext(std::vector<std::pair<std::string, std::string> >& result);
+  leveldb::Status IteratorStatus();
+  void IteratorEnd();
+  void Release();
+
+ private:
   Database* database;
   uint32_t id;
   leveldb::Iterator* dbIterator;
   leveldb::ReadOptions* options;
   leveldb::Slice* start;
-  leveldb::Slice* target;
   std::string* end;
-  bool seeking;
-  bool landed;
   bool reverse;
   bool keys;
   bool values;
@@ -76,24 +71,25 @@ private:
   int count;
   size_t highWaterMark;
 
-public:
+ public:
   bool keyAsBuffer;
   bool valueAsBuffer;
   bool nexting;
   bool ended;
   AsyncWorker* endWorker;
 
-private:
-  bool Read (std::string& key, std::string& value);
-  bool GetIterator ();
-  bool OutOfRange (leveldb::Slice* target);
+ private:
+  JS_PERSISTENT_OBJECT persistentHandle;
 
-  static NAN_METHOD(New);
-  static NAN_METHOD(Seek);
-  static NAN_METHOD(Next);
-  static NAN_METHOD(End);
+  bool Read(std::string& key, std::string& value);
+  bool GetIterator();
+
+  static DEFINE_JS_METHOD(New);
+  static DEFINE_JS_METHOD(Next);
+  static DEFINE_JS_METHOD(End);
 };
 
-} // namespace leveldown
+}  // namespace leveldown
 
+#endif
 #endif

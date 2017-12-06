@@ -1,7 +1,7 @@
 {'targets': [{
     'target_name': 'leveldb'
   , 'variables': {
-        'ldbversion': '1.20'
+        'ldbversion': '1.17.0'
     }
   , 'type': 'static_library'
     # Overcomes an issue with the linker and thin .a files on SmartOS
@@ -26,13 +26,17 @@
     ]
   , 'conditions': [
         ['OS == "win"', {
-            'conditions': [
-                ['MSVS_VERSION != "2015" and MSVS_VERSION != "2013"', {
-                     'include_dirs': [ 'leveldb-<(ldbversion)/port/win' ]
-                }]
-            ],
+		    'conditions': [
+			  ['MSVS_VERSION != "2015" and MSVS_VERSION != "2013"', {
+			    'include_dirs': [
+                  'leveldb-<(ldbversion)/port/win'
+                ]
+			  }]
+			],
             'include_dirs': [
-                'port-libuv/'
+              'port-libuv/',
+			  '../../../uv/include/',
+			  '../../../uv/src/'
             ]
           , 'defines': [
                 'LEVELDB_PLATFORM_UV=1'
@@ -74,7 +78,7 @@
               , '-Wno-unused-but-set-variable'
             ]
         }]
-      , ['OS == "linux"', {
+      , ['OS in "android linux"', {
             'defines': [
                 'OS_LINUX=1'
             ]
@@ -84,25 +88,15 @@
           , 'ccflags': [
                 '-pthread'
             ]
+        }],
+        ['OS == "android"', {
+          'defines': [
+            'OS_ANDROID', 'LEVELDB_PLATFORM_ANDROID',
+          ]
         }]
       , ['OS == "freebsd"', {
             'defines': [
                 'OS_FREEBSD=1'
-              , '_REENTRANT=1'
-            ]
-          , 'libraries': [
-                '-lpthread'
-            ]
-          , 'ccflags': [
-                '-pthread'
-            ]
-          , 'cflags': [
-                '-Wno-sign-compare'
-            ]
-        }]
-      , ['OS == "openbsd"', {
-            'defines': [
-                'OS_OPENBSD=1'
               , '_REENTRANT=1'
             ]
           , 'libraries': [
@@ -128,48 +122,21 @@
                 '-pthread'
             ]
         }]
-      , ['OS == "mac"', {
+      , ['OS in "mac ios"', {
             'defines': [
                 'OS_MACOSX=1'
             ]
           , 'libraries': []
           , 'ccflags': []
           , 'xcode_settings': {
-                'WARNING_CFLAGS': [
-                    '-Wno-sign-compare'
-                  , '-Wno-unused-variable'
-                  , '-Wno-unused-function'
-                ]
+              'WARNING_CFLAGS': [
+                '-Wno-sign-compare'
+              , '-Wno-unused-variable'
+              , '-Wno-unused-function'
+              ],
+              'OTHER_CPLUSPLUSFLAGS' : ['-std=c++11', '-stdlib=libstdc++'],
+              'OTHER_CFLAGS' : ['-std=gnu99'],
             }
-        }]
-      , ['OS == "android"', {
-           'defines': [
-                'OS_ANDROID=1'
-              , '_REENTRANT=1'
-            ]
-          , 'libraries': [
-                '-lpthread'
-            ]
-          , 'ccflags': [
-                '-pthread',
-                '-fno-builtin-memcmp',
-                '-fexceptions'
-            ]
-          , 'cflags': [
-                '-fPIC'
-            ]
-          , 'cflags!': [
-                '-fno-exceptions'
-              , '-fPIE'
-              , '-mfloat-abi=hard'
-              , '-Wno-unused-but-set-variable'
-            ]
-          , 'cflags_cc!': [ '-fno-exceptions' ]
-        }]
-      , ['target_arch == "arm"', {
-            'cflags': [
-          '-mfloat-abi=hard'
-      ]
         }]
     ]
   , 'sources': [
@@ -206,7 +173,6 @@
       , 'leveldb-<(ldbversion)/include/leveldb/cache.h'
       , 'leveldb-<(ldbversion)/include/leveldb/comparator.h'
       , 'leveldb-<(ldbversion)/include/leveldb/db.h'
-      , 'leveldb-<(ldbversion)/include/leveldb/dumpfile.h'
       , 'leveldb-<(ldbversion)/include/leveldb/env.h'
       , 'leveldb-<(ldbversion)/include/leveldb/filter_policy.h'
       , 'leveldb-<(ldbversion)/include/leveldb/iterator.h'
@@ -217,7 +183,6 @@
       , 'leveldb-<(ldbversion)/include/leveldb/table_builder.h'
       , 'leveldb-<(ldbversion)/include/leveldb/write_batch.h'
       , 'leveldb-<(ldbversion)/port/port.h'
-      , 'leveldb-<(ldbversion)/port/port_posix_sse.cc'
       , 'leveldb-<(ldbversion)/table/block.cc'
       , 'leveldb-<(ldbversion)/table/block.h'
       , 'leveldb-<(ldbversion)/table/block_builder.cc'

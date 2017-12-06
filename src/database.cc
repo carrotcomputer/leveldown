@@ -1,4 +1,6 @@
-/* Copyright (c) 2012-2017 LevelDOWN contributors
+#if defined(JS_ENGINE_V8) or defined(JS_ENGINE_MOZJS) or \
+    defined(JS_ENGINE_CHAKRA)
+/* Copyright (c) 2012-2015 LevelDOWN contributors
  * See list at <https://github.com/level/leveldown#contributing>
  * MIT License <https://github.com/level/leveldown/blob/master/LICENSE.md>
  */
@@ -15,95 +17,77 @@
 #include "database_async.h"
 #include "batch.h"
 #include "iterator.h"
-#include "common.h"
+#include "jx_persistent_store.h"
 
 namespace leveldown {
 
-static Nan::Persistent<v8::FunctionTemplate> database_constructor;
+jxcore::ThreadStore<JS_PERSISTENT_FUNCTION_TEMPLATE> Database::jx_persistent;
 
-Database::Database (const v8::Local<v8::Value>& from)
-  : location(new Nan::Utf8String(from))
-  , db(NULL)
-  , currentIteratorId(0)
-  , pendingCloseWorker(NULL)
-  , blockCache(NULL)
-  , filterPolicy(NULL) {};
+Database::Database(const JS_HANDLE_VALUE& from)
+    : db(NULL),
+      currentIteratorId(0),
+      pendingCloseWorker(NULL),
+      blockCache(NULL),
+      filterPolicy(NULL) {
+  location.SetFromHandle(from);
+};
 
-Database::~Database () {
-  if (db != NULL)
-    delete db;
-  delete location;
+Database::~Database() {
+  if (db != NULL) delete db;
+  location.Dispose();
 };
 
 /* Calls from worker threads, NO V8 HERE *****************************/
 
-leveldb::Status Database::OpenDatabase (
-        leveldb::Options* options
-    ) {
-  return leveldb::DB::Open(*options, **location, &db);
+leveldb::Status Database::OpenDatabase(leveldb::Options* options) {
+  return leveldb::DB::Open(*options, *location, &db);
 }
 
-leveldb::Status Database::PutToDatabase (
-        leveldb::WriteOptions* options
-      , leveldb::Slice key
-      , leveldb::Slice value
-    ) {
+leveldb::Status Database::PutToDatabase(leveldb::WriteOptions* options,
+                                        leveldb::Slice key,
+                                        leveldb::Slice value) {
   return db->Put(*options, key, value);
 }
 
-leveldb::Status Database::GetFromDatabase (
-        leveldb::ReadOptions* options
-      , leveldb::Slice key
-      , std::string& value
-    ) {
+leveldb::Status Database::GetFromDatabase(leveldb::ReadOptions* options,
+                                          leveldb::Slice key,
+                                          std::string& value) {
   return db->Get(*options, key, &value);
 }
 
-leveldb::Status Database::DeleteFromDatabase (
-        leveldb::WriteOptions* options
-      , leveldb::Slice key
-    ) {
+leveldb::Status Database::DeleteFromDatabase(leveldb::WriteOptions* options,
+                                             leveldb::Slice key) {
   return db->Delete(*options, key);
 }
 
-leveldb::Status Database::WriteBatchToDatabase (
-        leveldb::WriteOptions* options
-      , leveldb::WriteBatch* batch
-    ) {
+leveldb::Status Database::WriteBatchToDatabase(leveldb::WriteOptions* options,
+                                               leveldb::WriteBatch* batch) {
   return db->Write(*options, batch);
 }
 
-uint64_t Database::ApproximateSizeFromDatabase (const leveldb::Range* range) {
+uint64_t Database::ApproximateSizeFromDatabase(const leveldb::Range* range) {
   uint64_t size;
   db->GetApproximateSizes(range, 1, &size);
   return size;
 }
 
-void Database::CompactRangeFromDatabase (const leveldb::Slice* start, 
-                                         const leveldb::Slice* end) {
-  db->CompactRange(start, end);
-}
-
-void Database::GetPropertyFromDatabase (
-      const leveldb::Slice& property
-    , std::string* value) {
+void Database::GetPropertyFromDatabase(const leveldb::Slice& property,
+                                       std::string* value) {
 
   db->GetProperty(property, value);
 }
 
-leveldb::Iterator* Database::NewIterator (leveldb::ReadOptions* options) {
+leveldb::Iterator* Database::NewIterator(leveldb::ReadOptions* options) {
   return db->NewIterator(*options);
 }
 
-const leveldb::Snapshot* Database::NewSnapshot () {
-  return db->GetSnapshot();
-}
+const leveldb::Snapshot* Database::NewSnapshot() { return db->GetSnapshot(); }
 
-void Database::ReleaseSnapshot (const leveldb::Snapshot* snapshot) {
+void Database::ReleaseSnapshot(const leveldb::Snapshot* snapshot) {
   return db->ReleaseSnapshot(snapshot);
 }
 
-void Database::ReleaseIterator (uint32_t id) {
+void Database::ReleaseIterator(uint32_t id) {
   // called each time an Iterator is End()ed, in the main thread
   // we have to remove our reference to it and if it's the last iterator
   // we have to invoke a pending CloseWorker if there is one
@@ -111,12 +95,12 @@ void Database::ReleaseIterator (uint32_t id) {
   // iterators to end before we can close them
   iterators.erase(id);
   if (iterators.empty() && pendingCloseWorker != NULL) {
-    Nan::AsyncQueueWorker((AsyncWorker*)pendingCloseWorker);
+    NanAsyncQueueWorker((AsyncWorker*)pendingCloseWorker);
     pendingCloseWorker = NULL;
   }
 }
 
-void Database::CloseDatabase () {
+void Database::CloseDatabase() {
   delete db;
   db = NULL;
   if (blockCache) {
@@ -131,112 +115,107 @@ void Database::CloseDatabase () {
 
 /* V8 exposed functions *****************************/
 
-NAN_METHOD(LevelDOWN) {
-  v8::Local<v8::String> location = info[0].As<v8::String>();
-  info.GetReturnValue().Set(Database::NewInstance(location));
+JS_METHOD(Database, New) {
+  JS_CLASS_NEW_INSTANCE(obj, Database);
+  JS_LOCAL_OBJECT arg0 = JS_VALUE_TO_OBJECT(args.GetItem(0));
+  Database* db = new Database(arg0);
+  db->Wrap(obj);
+
+  RETURN_PARAM(obj);
+}
+JS_METHOD_END
+
+JS_HANDLE_VALUE Database::NewInstance(JS_LOCAL_STRING& location) {
+  JS_ENTER_SCOPE_COM();
+  JS_DEFINE_STATE_MARKER(com);
+
+  JS_LOCAL_OBJECT instance;
+
+  JS_LOCAL_FUNCTION_TEMPLATE constructorHandle =
+      JS_TYPE_TO_LOCAL_FUNCTION_TEMPLATE(
+          Database::jx_persistent.templates[com->threadId]);
+
+  JS_HANDLE_VALUE argv[] = {location};
+
+  JS_LOCAL_FUNCTION cons = JS_GET_FUNCTION(constructorHandle);
+  instance = JS_NEW_INSTANCE(cons, 1, argv);
+
+  return JS_LEAVE_SCOPE(instance);
 }
 
-void Database::Init () {
-  v8::Local<v8::FunctionTemplate> tpl = Nan::New<v8::FunctionTemplate>(Database::New);
-  database_constructor.Reset(tpl);
-  tpl->SetClassName(Nan::New("Database").ToLocalChecked());
-  tpl->InstanceTemplate()->SetInternalFieldCount(1);
-  Nan::SetPrototypeMethod(tpl, "open", Database::Open);
-  Nan::SetPrototypeMethod(tpl, "close", Database::Close);
-  Nan::SetPrototypeMethod(tpl, "put", Database::Put);
-  Nan::SetPrototypeMethod(tpl, "get", Database::Get);
-  Nan::SetPrototypeMethod(tpl, "del", Database::Delete);
-  Nan::SetPrototypeMethod(tpl, "batch", Database::Batch);
-  Nan::SetPrototypeMethod(tpl, "approximateSize", Database::ApproximateSize);
-  Nan::SetPrototypeMethod(tpl, "compactRange", Database::CompactRange);
-  Nan::SetPrototypeMethod(tpl, "getProperty", Database::GetProperty);
-  Nan::SetPrototypeMethod(tpl, "iterator", Database::Iterator);
-}
-
-NAN_METHOD(Database::New) {
-  Database* obj = new Database(info[0]);
-  obj->Wrap(info.This());
-
-  info.GetReturnValue().Set(info.This());
-}
-
-v8::Local<v8::Value> Database::NewInstance (v8::Local<v8::String> &location) {
-  Nan::EscapableHandleScope scope;
-
-  Nan::MaybeLocal<v8::Object> maybeInstance;
-  v8::Local<v8::Object> instance;
-
-  v8::Local<v8::FunctionTemplate> constructorHandle =
-      Nan::New<v8::FunctionTemplate>(database_constructor);
-
-  v8::Local<v8::Value> argv[] = { location };
-  maybeInstance = Nan::NewInstance(constructorHandle->GetFunction(), 1, argv);
-
-  if (maybeInstance.IsEmpty())
-      Nan::ThrowError("Could not create new Database instance");
-  else
-    instance = maybeInstance.ToLocalChecked();
-  return scope.Escape(instance);
-}
-
-NAN_METHOD(Database::Open) {
+JS_METHOD(Database, Open) {
   LD_METHOD_SETUP_COMMON(open, 0, 1)
 
-  bool createIfMissing = BooleanOptionValue(optionsObj, "createIfMissing", true);
-  bool errorIfExists = BooleanOptionValue(optionsObj, "errorIfExists");
-  bool compression = BooleanOptionValue(optionsObj, "compression", true);
+  JS_LOCAL_VALUE obj;
 
-  uint32_t cacheSize = UInt32OptionValue(optionsObj, "cacheSize", 8 << 20);
-  uint32_t writeBufferSize = UInt32OptionValue(
-      optionsObj
-    , "writeBufferSize"
-    , 4 << 20
-  );
-  uint32_t blockSize = UInt32OptionValue(optionsObj, "blockSize", 4096);
-  uint32_t maxOpenFiles = UInt32OptionValue(optionsObj, "maxOpenFiles", 1000);
-  uint32_t blockRestartInterval = UInt32OptionValue(
-      optionsObj
-    , "blockRestartInterval"
-    , 16
-  );
-  uint32_t maxFileSize = UInt32OptionValue(optionsObj, "maxFileSize", 2 << 20);
+  bool createIfMissing = true;
+  if (JS_HAS_NAME(optionsObj, JS_STRING_ID("createIfMissing"))) {
+    obj = JS_GET_NAME(optionsObj, JS_STRING_ID("createIfMissing"));
+    createIfMissing = BOOLEAN_TO_STD(obj);
+  }
+
+  bool errorIfExists = false;
+  if (JS_HAS_NAME(optionsObj, JS_STRING_ID("errorIfExists"))) {
+    obj = JS_GET_NAME(optionsObj, JS_STRING_ID("errorIfExists"));
+    errorIfExists = BOOLEAN_TO_STD(obj);
+  }
+
+  bool compression = true;
+  if (JS_HAS_NAME(optionsObj, JS_STRING_ID("compression"))) {
+    obj = JS_GET_NAME(optionsObj, JS_STRING_ID("compression"));
+    compression = BOOLEAN_TO_STD(obj);
+  }
+
+  uint32_t cacheSize = 8 << 20;
+  if (JS_HAS_NAME(optionsObj, JS_STRING_ID("cacheSize"))) {
+    obj = JS_GET_NAME(optionsObj, JS_STRING_ID("cacheSize"));
+    cacheSize = NUMBER_TO_STD(obj);
+  }
+
+  uint32_t writeBufferSize = 4 << 20;
+  if (JS_HAS_NAME(optionsObj, JS_STRING_ID("writeBufferSize"))) {
+    obj = JS_GET_NAME(optionsObj, JS_STRING_ID("writeBufferSize"));
+    writeBufferSize = NUMBER_TO_STD(obj);
+  }
+
+  uint32_t blockSize = 4096;
+  if (JS_HAS_NAME(optionsObj, JS_STRING_ID("blockSize"))) {
+    obj = JS_GET_NAME(optionsObj, JS_STRING_ID("blockSize"));
+    blockSize = NUMBER_TO_STD(obj);
+  }
+
+  uint32_t maxOpenFiles = 1000;
+  if (JS_HAS_NAME(optionsObj, JS_STRING_ID("maxOpenFiles"))) {
+    obj = JS_GET_NAME(optionsObj, JS_STRING_ID("maxOpenFiles"));
+    maxOpenFiles = NUMBER_TO_STD(obj);
+  }
+
+  uint32_t blockRestartInterval = 16;
+  if (JS_HAS_NAME(optionsObj, JS_STRING_ID("blockRestartInterval"))) {
+    obj = JS_GET_NAME(optionsObj, JS_STRING_ID("blockRestartInterval"));
+    blockRestartInterval = NUMBER_TO_STD(obj);
+  }
 
   database->blockCache = leveldb::NewLRUCache(cacheSize);
   database->filterPolicy = leveldb::NewBloomFilterPolicy(10);
 
   OpenWorker* worker = new OpenWorker(
-      database
-    , new Nan::Callback(callback)
-    , database->blockCache
-    , database->filterPolicy
-    , createIfMissing
-    , errorIfExists
-    , compression
-    , writeBufferSize
-    , blockSize
-    , maxOpenFiles
-    , blockRestartInterval
-    , maxFileSize
-  );
+      database, new NanCallback(callback), database->blockCache,
+      database->filterPolicy, createIfMissing, errorIfExists, compression,
+      writeBufferSize, blockSize, maxOpenFiles, blockRestartInterval);
   // persist to prevent accidental GC
-  v8::Local<v8::Object> _this = info.This();
+  JS_LOCAL_OBJECT _this = JS_TYPE_TO_LOCAL_OBJECT(args.This());
   worker->SaveToPersistent("database", _this);
-  Nan::AsyncQueueWorker(worker);
+  NanAsyncQueueWorker(worker);
 }
+JS_METHOD_END
 
-// for an empty callback to iterator.end()
-NAN_METHOD(EmptyMethod) {
-}
-
-NAN_METHOD(Database::Close) {
+JS_METHOD(Database, Close) {
   LD_METHOD_SETUP_COMMON_ONEARG(close)
 
-  CloseWorker* worker = new CloseWorker(
-      database
-    , new Nan::Callback(callback)
-  );
+  CloseWorker* worker = new CloseWorker(database, new NanCallback(callback));
   // persist to prevent accidental GC
-  v8::Local<v8::Object> _this = info.This();
+  JS_LOCAL_OBJECT _this = JS_TYPE_TO_LOCAL_OBJECT(args.This());
   worker->SaveToPersistent("database", _this);
 
   if (!database->iterators.empty()) {
@@ -245,153 +224,172 @@ NAN_METHOD(Database::Close) {
     // the CloseWorker will be invoked once they are all cleaned up
     database->pendingCloseWorker = worker;
 
-    for (
-        std::map< uint32_t, leveldown::Iterator * >::iterator it
-            = database->iterators.begin()
-      ; it != database->iterators.end()
-      ; ++it) {
+    for (std::map<uint32_t, leveldown::Iterator*>::iterator it =
+             database->iterators.begin();
+         it != database->iterators.end(); ++it) {
 
-        // for each iterator still open, first check if it's already in
-        // the process of ending (ended==true means an async End() is
-        // in progress), if not, then we call End() with an empty callback
-        // function and wait for it to hit ReleaseIterator() where our
-        // CloseWorker will be invoked
+      // for each iterator still open, first check if it's already in
+      // the process of ending (ended==true means an async End() is
+      // in progress), if not, then we call End() with an empty callback
+      // function and wait for it to hit ReleaseIterator() where our
+      // CloseWorker will be invoked
 
-        leveldown::Iterator *iterator = it->second;
+      leveldown::Iterator* iterator = it->second;
 
-        if (!iterator->ended) {
-          v8::Local<v8::Function> end =
-              v8::Local<v8::Function>::Cast(iterator->handle()->Get(
-                  Nan::New<v8::String>("end").ToLocalChecked()));
-          v8::Local<v8::Value> argv[] = {
-              Nan::New<v8::FunctionTemplate>(EmptyMethod)->GetFunction() // empty callback
-          };
-          Nan::MakeCallback(
-              iterator->handle()
-            , end
-            , 1
-            , argv
-          );
+      if (!iterator->ended) {
+        JS_LOCAL_OBJECT obj = NanObjectWrapHandle(iterator);
+        JS_LOCAL_VALUE obj_end;
+        if (JS_HAS_NAME(obj, JS_STRING_ID("end"))) {
+          obj_end = JS_GET_NAME(obj, JS_STRING_ID("end"));
         }
+
+        if (JS_IS_FUNCTION(obj_end)) {
+          JS_LOCAL_FUNCTION end = JS_TYPE_AS_FUNCTION(obj_end);
+          JS_LOCAL_FUNCTION_TEMPLATE tmp = JS_NEW_EMPTY_FUNCTION_TEMPLATE();
+
+          JS_LOCAL_VALUE argv[] = {JS_GET_FUNCTION(tmp)};
+          NanMakeCallback(obj, end, 1, argv);
+        } else {
+          THROW_EXCEPTION(
+              "database instance doesn't have end function defined");
+        }
+      }
     }
   } else {
-    Nan::AsyncQueueWorker(worker);
+    NanAsyncQueueWorker(worker);
   }
 }
+JS_METHOD_END
 
-NAN_METHOD(Database::Put) {
+JS_METHOD(Database, Put) {
   LD_METHOD_SETUP_COMMON(put, 2, 3)
 
-  v8::Local<v8::Object> keyHandle = info[0].As<v8::Object>();
-  v8::Local<v8::Object> valueHandle = info[1].As<v8::Object>();
-  LD_STRING_OR_BUFFER_TO_SLICE(key, keyHandle, key);
-  LD_STRING_OR_BUFFER_TO_SLICE(value, valueHandle, value);
+  JS_LOCAL_OBJECT keyHandle;
+  if (!args.IsNull(0) && !args.IsUndefined(0))
+    keyHandle = JS_VALUE_TO_OBJECT(GET_ARG(0));
 
-  bool sync = BooleanOptionValue(optionsObj, "sync");
+  JS_LOCAL_OBJECT valueHandle;
+  
+  if (!args.IsNull(1) && !args.IsUndefined(1))  
+    valueHandle = JS_VALUE_TO_OBJECT(GET_ARG(1));
+  
+  LD_STRING_OR_BUFFER_TO_SLICE(key, keyHandle, key)
+  LD_STRING_OR_BUFFER_TO_SLICE(value, valueHandle, value)
 
-  WriteWorker* worker  = new WriteWorker(
-      database
-    , new Nan::Callback(callback)
-    , key
-    , value
-    , sync
-    , keyHandle
-    , valueHandle
-  );
-
-  // persist to prevent accidental GC
-  v8::Local<v8::Object> _this = info.This();
-  worker->SaveToPersistent("database", _this);
-  Nan::AsyncQueueWorker(worker);
-}
-
-NAN_METHOD(Database::Get) {
-  LD_METHOD_SETUP_COMMON(get, 1, 2)
-
-  v8::Local<v8::Object> keyHandle = info[0].As<v8::Object>();
-  LD_STRING_OR_BUFFER_TO_SLICE(key, keyHandle, key);
-
-  bool asBuffer = BooleanOptionValue(optionsObj, "asBuffer", true);
-  bool fillCache = BooleanOptionValue(optionsObj, "fillCache", true);
-
-  ReadWorker* worker = new ReadWorker(
-      database
-    , new Nan::Callback(callback)
-    , key
-    , asBuffer
-    , fillCache
-    , keyHandle
-  );
-  // persist to prevent accidental GC
-  v8::Local<v8::Object> _this = info.This();
-  worker->SaveToPersistent("database", _this);
-  Nan::AsyncQueueWorker(worker);
-}
-
-NAN_METHOD(Database::Delete) {
-  LD_METHOD_SETUP_COMMON(del, 1, 2)
-
-  v8::Local<v8::Object> keyHandle = info[0].As<v8::Object>();
-  LD_STRING_OR_BUFFER_TO_SLICE(key, keyHandle, key);
-
-  bool sync = BooleanOptionValue(optionsObj, "sync");
-
-  DeleteWorker* worker = new DeleteWorker(
-      database
-    , new Nan::Callback(callback)
-    , key
-    , sync
-    , keyHandle
-  );
-  // persist to prevent accidental GC
-  v8::Local<v8::Object> _this = info.This();
-  worker->SaveToPersistent("database", _this);
-  Nan::AsyncQueueWorker(worker);
-}
-
-NAN_METHOD(Database::Batch) {
-  if ((info.Length() == 0 || info.Length() == 1) && !info[0]->IsArray()) {
-    v8::Local<v8::Object> optionsObj;
-    if (info.Length() > 0 && info[0]->IsObject()) {
-      optionsObj = info[0].As<v8::Object>();
-    }
-    info.GetReturnValue().Set(Batch::NewInstance(info.This(), optionsObj));
-    return;
+  bool sync = false;
+  if (!JS_IS_EMPTY(optionsObj) && JS_HAS_NAME(optionsObj, JS_STRING_ID("sync"))) {
+    JS_LOCAL_VALUE obj_sync = JS_GET_NAME(optionsObj, JS_STRING_ID("sync"));
+    sync = BOOLEAN_TO_STD(obj_sync);
   }
 
-  LD_METHOD_SETUP_COMMON(batch, 1, 2);
+  WriteWorker* worker =
+      new WriteWorker(database, new NanCallback(callback), key, value, sync,
+                      keyHandle, valueHandle);
 
-  bool sync = BooleanOptionValue(optionsObj, "sync");
+  // persist to prevent accidental GC
+  JS_LOCAL_OBJECT _this = JS_TYPE_TO_LOCAL_OBJECT(args.This());
+  worker->SaveToPersistent("database", _this);
+  NanAsyncQueueWorker(worker);
+}
+JS_METHOD_END
 
-  v8::Local<v8::Array> array = v8::Local<v8::Array>::Cast(info[0]);
+JS_METHOD(Database, Get) {
+  LD_METHOD_SETUP_COMMON(get, 1, 2)
+
+  JS_LOCAL_OBJECT keyHandle = JS_VALUE_TO_OBJECT(args.GetItem(0));
+  LD_STRING_OR_BUFFER_TO_SLICE(key, keyHandle, key)
+
+  bool asBuffer = true;
+  if (JS_HAS_NAME(optionsObj, JS_STRING_ID("asBuffer"))) {
+    JS_LOCAL_VALUE obj_sync = JS_GET_NAME(optionsObj, JS_STRING_ID("asBuffer"));
+    asBuffer = BOOLEAN_TO_STD(obj_sync);
+  }
+
+  bool fillCache = true;
+  if (JS_HAS_NAME(optionsObj, JS_STRING_ID("fillCache"))) {
+    JS_LOCAL_VALUE obj_sync =
+        JS_GET_NAME(optionsObj, JS_STRING_ID("fillCache"));
+    fillCache = BOOLEAN_TO_STD(obj_sync);
+  }
+
+  ReadWorker* worker = new ReadWorker(database, new NanCallback(callback), key,
+                                      asBuffer, fillCache, keyHandle);
+  // persist to prevent accidental GC
+  JS_LOCAL_OBJECT _this = JS_TYPE_TO_LOCAL_OBJECT(args.This());
+  worker->SaveToPersistent("database", _this);
+  NanAsyncQueueWorker(worker);
+}
+JS_METHOD_END
+
+JS_METHOD(Database, Delete) {
+  LD_METHOD_SETUP_COMMON(del, 1, 2)
+
+  JS_LOCAL_OBJECT keyHandle = JS_VALUE_TO_OBJECT(args.GetItem(0));
+  LD_STRING_OR_BUFFER_TO_SLICE(key, keyHandle, key)
+
+  bool sync = false;
+  if (JS_HAS_NAME(optionsObj, JS_STRING_ID("sync"))) {
+    JS_LOCAL_VALUE obj_sync = JS_GET_NAME(optionsObj, JS_STRING_ID("sync"));
+    sync = BOOLEAN_TO_STD(obj_sync);
+  }
+
+  DeleteWorker* worker = new DeleteWorker(database, new NanCallback(callback),
+                                          key, sync, keyHandle);
+  // persist to prevent accidental GC
+  JS_LOCAL_OBJECT _this = JS_TYPE_TO_LOCAL_OBJECT(args.This());
+  worker->SaveToPersistent("database", _this);
+  NanAsyncQueueWorker(worker);
+}
+JS_METHOD_END
+
+JS_METHOD(Database, Batch) {
+  if ((args.Length() == 0 || args.Length() == 1) && !args.IsArray(0)) {
+    JS_LOCAL_OBJECT optionsObj;
+    if (args.Length() > 0 && args.IsObject(0)) {
+      optionsObj = JS_VALUE_TO_OBJECT(args.GetItem(0));
+    }
+
+    JS_LOCAL_OBJECT _this = JS_TYPE_TO_LOCAL_OBJECT(args.This());
+    RETURN_PARAM(Batch::NewInstance(_this, optionsObj));
+  }
+
+  LD_METHOD_SETUP_COMMON(batch, 1, 2)
+
+  bool sync = false;
+  if (JS_HAS_NAME(optionsObj, JS_STRING_ID("sync"))) {
+    JS_LOCAL_VALUE obj_sync = JS_GET_NAME(optionsObj, JS_STRING_ID("sync"));
+    sync = BOOLEAN_TO_STD(obj_sync);
+  }
+
+  JS_HANDLE_ARRAY array = JS_TYPE_AS_ARRAY(args.GetItem(0));
 
   leveldb::WriteBatch* batch = new leveldb::WriteBatch();
   bool hasData = false;
 
-  for (unsigned int i = 0; i < array->Length(); i++) {
-    if (!array->Get(i)->IsObject())
-      continue;
+  unsigned ln = JS_GET_ARRAY_LENGTH(array);
+  for (unsigned int i = 0; i < ln; i++) {
+    JS_LOCAL_VALUE val = JS_GET_INDEX(array, i);
+    if (!JS_IS_OBJECT(val)) continue;
+    JS_LOCAL_OBJECT obj = JS_VALUE_TO_OBJECT(val);
 
-    v8::Local<v8::Object> obj = v8::Local<v8::Object>::Cast(array->Get(i));
-    v8::Local<v8::Value> keyBuffer = obj->Get(Nan::New("key").ToLocalChecked());
-    v8::Local<v8::Value> type = obj->Get(Nan::New("type").ToLocalChecked());
+    JS_LOCAL_VALUE keyBuffer = JS_GET_NAME(obj, JS_STRING_ID("key"));
+    JS_LOCAL_VALUE type = JS_GET_NAME(obj, JS_STRING_ID("type"));
 
-    if (type->StrictEquals(Nan::New("del").ToLocalChecked())) {
+    jxcore::JXString str_type(type);
+    if (strcmp(*str_type, "del") == 0) {
       LD_STRING_OR_BUFFER_TO_SLICE(key, keyBuffer, key)
 
       batch->Delete(key);
-      if (!hasData)
-        hasData = true;
+      if (!hasData) hasData = true;
 
       DisposeStringOrBufferFromSlice(keyBuffer, key);
-    } else if (type->StrictEquals(Nan::New("put").ToLocalChecked())) {
-      v8::Local<v8::Value> valueBuffer = obj->Get(Nan::New("value").ToLocalChecked());
+    } else if (strcmp(*str_type, "put") == 0) {
+      JS_LOCAL_VALUE valueBuffer = JS_GET_NAME(obj, STD_TO_STRING("value"));
 
       LD_STRING_OR_BUFFER_TO_SLICE(key, keyBuffer, key)
       LD_STRING_OR_BUFFER_TO_SLICE(value, valueBuffer, value)
       batch->Put(key, value);
-      if (!hasData)
-        hasData = true;
+      if (!hasData) hasData = true;
 
       DisposeStringOrBufferFromSlice(keyBuffer, key);
       DisposeStringOrBufferFromSlice(valueBuffer, value);
@@ -400,124 +398,88 @@ NAN_METHOD(Database::Batch) {
 
   // don't allow an empty batch through
   if (hasData) {
-    BatchWorker* worker = new BatchWorker(
-        database
-      , new Nan::Callback(callback)
-      , batch
-      , sync
-    );
+    BatchWorker* worker =
+        new BatchWorker(database, new NanCallback(callback), batch, sync);
     // persist to prevent accidental GC
-    v8::Local<v8::Object> _this = info.This();
+    JS_LOCAL_OBJECT _this = JS_TYPE_TO_LOCAL_OBJECT(args.This());
     worker->SaveToPersistent("database", _this);
-    Nan::AsyncQueueWorker(worker);
+    NanAsyncQueueWorker(worker);
   } else {
     LD_RUN_CALLBACK(callback, 0, NULL);
   }
 }
+JS_METHOD_END
 
-NAN_METHOD(Database::ApproximateSize) {
-  v8::Local<v8::Object> startHandle = info[0].As<v8::Object>();
-  v8::Local<v8::Object> endHandle = info[1].As<v8::Object>();
+JS_METHOD(Database, ApproximateSize) {
+  JS_LOCAL_OBJECT startHandle = JS_VALUE_TO_OBJECT(args.GetItem(0));
+  JS_LOCAL_OBJECT endHandle = JS_VALUE_TO_OBJECT(args.GetItem(1));
 
   LD_METHOD_SETUP_COMMON(approximateSize, -1, 2)
 
   LD_STRING_OR_BUFFER_TO_SLICE(start, startHandle, start)
   LD_STRING_OR_BUFFER_TO_SLICE(end, endHandle, end)
 
-  ApproximateSizeWorker* worker  = new ApproximateSizeWorker(
-      database
-    , new Nan::Callback(callback)
-    , start
-    , end
-    , startHandle
-    , endHandle
-  );
+  ApproximateSizeWorker* worker = new ApproximateSizeWorker(
+      database, new NanCallback(callback), start, end, startHandle, endHandle);
   // persist to prevent accidental GC
-  v8::Local<v8::Object> _this = info.This();
+  JS_LOCAL_OBJECT _this = JS_TYPE_TO_LOCAL_OBJECT(args.This());
   worker->SaveToPersistent("database", _this);
-  Nan::AsyncQueueWorker(worker);
+  NanAsyncQueueWorker(worker);
 }
+JS_METHOD_END
 
-NAN_METHOD(Database::CompactRange) {
-  v8::Local<v8::Object> startHandle = info[0].As<v8::Object>();
-  v8::Local<v8::Object> endHandle = info[1].As<v8::Object>();
+JS_METHOD(Database, GetProperty) {
+  if (args.Length() < 1) {
+    THROW_EXCEPTION("Database::GetProperty expects a parameter");
+  }
 
-  LD_METHOD_SETUP_COMMON(compactRange, -1, 2)
-  LD_STRING_OR_BUFFER_TO_SLICE(start, startHandle, start)
-  LD_STRING_OR_BUFFER_TO_SLICE(end, endHandle, end)
-
-  CompactRangeWorker* worker  = new CompactRangeWorker(
-      database
-    , new Nan::Callback(callback)
-    , start
-    , end
-    , startHandle
-    , endHandle
-  );
-  // persist to prevent accidental GC
-  v8::Local<v8::Object> _this = info.This();
-  worker->SaveToPersistent("database", _this);
-  Nan::AsyncQueueWorker(worker);
-}
-
-NAN_METHOD(Database::GetProperty) {
-  v8::Local<v8::Value> propertyHandle = info[0].As<v8::Object>();
-  v8::Local<v8::Function> callback; // for LD_STRING_OR_BUFFER_TO_SLICE
+  JS_LOCAL_VALUE propertyHandle = JS_VALUE_TO_OBJECT(args.GetItem(0));
+  JS_LOCAL_FUNCTION callback;
 
   LD_STRING_OR_BUFFER_TO_SLICE(property, propertyHandle, property)
 
   leveldown::Database* database =
-      Nan::ObjectWrap::Unwrap<leveldown::Database>(info.This());
+      node::ObjectWrap::Unwrap<leveldown::Database>(args.This());
 
   std::string* value = new std::string();
   database->GetPropertyFromDatabase(property, value);
-  v8::Local<v8::String> returnValue
-      = Nan::New<v8::String>(value->c_str(), value->length()).ToLocalChecked();
+  JS_LOCAL_STRING returnValue =
+      UTF8_TO_STRING_WITH_LENGTH(value->c_str(), value->length());
   delete value;
   delete[] property.data();
 
-  info.GetReturnValue().Set(returnValue);
+  RETURN_PARAM(returnValue);
 }
+JS_METHOD_END
 
-NAN_METHOD(Database::Iterator) {
-  Database* database = Nan::ObjectWrap::Unwrap<Database>(info.This());
+JS_METHOD(Database, Iterator) {
+  Database* database = node::ObjectWrap::Unwrap<Database>(args.This());
 
-  v8::Local<v8::Object> optionsObj;
-  if (info.Length() > 0 && info[0]->IsObject()) {
-    optionsObj = v8::Local<v8::Object>::Cast(info[0]);
+  JS_LOCAL_OBJECT optionsObj;
+  if (args.Length() > 0 && args.IsObject(0)) {
+    optionsObj = JS_VALUE_TO_OBJECT(args.GetItem(0));
   }
 
   // each iterator gets a unique id for this Database, so we can
   // easily store & lookup on our `iterators` map
   uint32_t id = database->currentIteratorId++;
-  Nan::TryCatch try_catch;
-  v8::Local<v8::Object> iteratorHandle = Iterator::NewInstance(
-      info.This()
-    , Nan::New<v8::Number>(id)
-    , optionsObj
-  );
+  JS_TRY_CATCH(try_catch);
+
+  JS_LOCAL_OBJECT _this = JS_TYPE_TO_LOCAL_OBJECT(args.This());
+  JS_LOCAL_OBJECT iteratorHandle =
+      Iterator::NewInstance(_this, STD_TO_NUMBER(id), optionsObj);
   if (try_catch.HasCaught()) {
-    // NB: node::FatalException can segfault here if there is no room on stack.
-    return Nan::ThrowError("Fatal Error in Database::Iterator!");
+    THROW_EXCEPTION("Fatal Error in Database::Iterator!");
   }
 
-  leveldown::Iterator *iterator =
-      Nan::ObjectWrap::Unwrap<leveldown::Iterator>(iteratorHandle);
+  leveldown::Iterator* iterator =
+      node::ObjectWrap::Unwrap<leveldown::Iterator>(iteratorHandle);
 
   database->iterators[id] = iterator;
 
-  // register our iterator
-  /*
-  v8::Local<v8::Object> obj = Nan::New<v8::Object>();
-  obj->Set(Nan::New("iterator"), iteratorHandle);
-  Nan::Persistent<v8::Object> persistent;
-  persistent.Reset(nan_isolate, obj);
-  database->iterators.insert(std::pair< uint32_t, Nan::Persistent<v8::Object> & >
-      (id, persistent));
-  */
-
-  info.GetReturnValue().Set(iteratorHandle);
+  RETURN_PARAM(iteratorHandle);
 }
+JS_METHOD_END
 
-
-} // namespace leveldown
+}  // namespace leveldown
+#endif

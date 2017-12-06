@@ -1,10 +1,18 @@
 const util              = require('util')
-    , AbstractLevelDOWN = require('abstract-leveldown').AbstractLevelDOWN
+    , AbstractLevelDOWN = require('abstract-leveldown').AbstractLevelDOWN;
 
-    , binding           = require('bindings')('leveldown').leveldown
+var binding;
 
-    , ChainedBatch      = require('./chained-batch')
-    , Iterator          = require('./iterator')
+if (process.versions.embedded && process.versions.embedded.leveldown) {
+  binding = jxcore.embeddedModule.require('leveldown').leveldown;
+} else {
+  var path = require('path');
+  var build_path = path.join(__dirname, 'build/Release/leveldown.node');
+  binding = require(build_path).leveldown;
+}
+    
+var ChainedBatch      = require('./chained-batch')
+    , Iterator        = require('./iterator')
 
 
 function LevelDOWN (location) {
@@ -58,11 +66,6 @@ LevelDOWN.prototype._approximateSize = function (start, end, callback) {
 }
 
 
-LevelDOWN.prototype.compactRange = function (start, end, callback) {
-  this.binding.compactRange(start, end, callback)
-}
-
-
 LevelDOWN.prototype.getProperty = function (property) {
   if (typeof property != 'string')
     throw new Error('getProperty() requires a valid `property` argument')
@@ -104,4 +107,4 @@ LevelDOWN.repair = function (location, callback) {
 }
 
 
-module.exports = LevelDOWN.default = LevelDOWN
+module.exports = LevelDOWN

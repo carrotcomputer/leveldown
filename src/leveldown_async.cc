@@ -1,4 +1,6 @@
-/* Copyright (c) 2012-2017 LevelDOWN contributors
+#if defined(JS_ENGINE_V8) or defined(JS_ENGINE_MOZJS) or \
+    defined(JS_ENGINE_CHAKRA)
+/* Copyright (c) 2012-2015 LevelDOWN contributors
  * See list at <https://github.com/level/leveldown#contributing>
  * MIT License <https://github.com/level/leveldown/blob/master/LICENSE.md>
  */
@@ -12,38 +14,27 @@ namespace leveldown {
 
 /** DESTROY WORKER **/
 
-DestroyWorker::DestroyWorker (
-    Nan::Utf8String* location
-  , Nan::Callback *callback
-) : AsyncWorker(NULL, callback)
-  , location(location)
-{};
+DestroyWorker::DestroyWorker(jxcore::JXString &location, NanCallback *callback)
+    : AsyncWorker(NULL, callback), location(location){};
 
-DestroyWorker::~DestroyWorker () {
-  delete location;
-}
+DestroyWorker::~DestroyWorker() { location.Dispose(); }
 
-void DestroyWorker::Execute () {
+void DestroyWorker::Execute() {
   leveldb::Options options;
-  SetStatus(leveldb::DestroyDB(**location, options));
+  SetStatus(leveldb::DestroyDB(*location, options));
 }
 
 /** REPAIR WORKER **/
 
-RepairWorker::RepairWorker (
-    Nan::Utf8String* location
-  , Nan::Callback *callback
-) : AsyncWorker(NULL, callback)
-  , location(location)
-{};
+RepairWorker::RepairWorker(jxcore::JXString &location, NanCallback *callback)
+    : AsyncWorker(NULL, callback), location(location){};
 
-RepairWorker::~RepairWorker () {
-  delete location;
-}
+RepairWorker::~RepairWorker() { location.Dispose(); }
 
-void RepairWorker::Execute () {
+void RepairWorker::Execute() {
   leveldb::Options options;
-  SetStatus(leveldb::RepairDB(**location, options));
+  SetStatus(leveldb::RepairDB(*location, options));
 }
 
-} // namespace leveldown
+}  // namespace leveldown
+#endif

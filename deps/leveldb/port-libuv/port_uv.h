@@ -30,7 +30,7 @@
   #include "stdint-msvc2008.h"
 #endif
   #define PLATFORM_IS_LITTLE_ENDIAN true
-#if _MSC_VER < 1900
+#if _MSC_VER<1900
   #define snprintf _snprintf
 #endif
   #define close _close
@@ -148,8 +148,6 @@ inline bool Snappy_Uncompress(const char* input, size_t length,
 inline bool GetHeapProfile(void (*func)(void*, const char*, int), void* arg) {
   return false;
 }
-
-uint32_t AcceleratedCRC32C(uint32_t crc, const char* buf, size_t size);
 
 } // namespace port
 } // namespace leveldb

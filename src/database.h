@@ -1,4 +1,6 @@
-/* Copyright (c) 2012-2017 LevelDOWN contributors
+#if defined(JS_ENGINE_V8) or defined(JS_ENGINE_MOZJS) or \
+    defined(JS_ENGINE_CHAKRA)
+/* Copyright (c) 2012-2015 LevelDOWN contributors
  * See list at <https://github.com/level/leveldown#contributing>
  * MIT License <https://github.com/level/leveldown/blob/master/LICENSE.md>
  */
@@ -13,99 +15,110 @@
 #include <leveldb/cache.h>
 #include <leveldb/db.h>
 #include <leveldb/filter_policy.h>
-#include <nan.h>
 
 #include "leveldown.h"
 #include "iterator.h"
 
+#include "jx_persistent_store.h"
+
 namespace leveldown {
 
-NAN_METHOD(LevelDOWN);
+DEFINE_JS_METHOD(LevelDOWN);
 
 struct Reference {
-  Nan::Persistent<v8::Object> handle;
+  JS_PERSISTENT_OBJECT handle;
   leveldb::Slice slice;
 
-  Reference(v8::Local<v8::Value> obj, leveldb::Slice slice) : slice(slice) {
-    v8::Local<v8::Object> _obj = Nan::New<v8::Object>();
-    _obj->Set(Nan::New("obj").ToLocalChecked(), obj);
-    handle.Reset(_obj);
+  Reference(JS_LOCAL_VALUE obj, leveldb::Slice slice) : slice(slice) {
+    JS_ENTER_SCOPE_COM();
+    JS_DEFINE_STATE_MARKER(com);
+
+    JS_LOCAL_OBJECT _obj = JS_NEW_EMPTY_OBJECT();
+    JS_NAME_SET(_obj, JS_STRING_ID("obj"), obj);
+    JS_NEW_PERSISTENT_OBJECT(handle, _obj);
   };
 };
 
-static inline void ClearReferences (std::vector<Reference *> *references) {
-  for (std::vector<Reference *>::iterator it = references->begin()
-      ; it != references->end()
-      ; ) {
+static inline void ClearReferences(std::vector<Reference*>* references) {
+  for (std::vector<Reference*>::iterator it = references->begin();
+       it != references->end();) {
     DisposeStringOrBufferFromSlice((*it)->handle, (*it)->slice);
     it = references->erase(it);
   }
   delete references;
 }
 
-class Database : public Nan::ObjectWrap {
-public:
-  static void Init ();
-  static v8::Local<v8::Value> NewInstance (v8::Local<v8::String> &location);
+class Database : public node::ObjectWrap {
+ public:
+  static jxcore::ThreadStore<JS_PERSISTENT_FUNCTION_TEMPLATE> jx_persistent;
 
-  leveldb::Status OpenDatabase (leveldb::Options* options);
-  leveldb::Status PutToDatabase (
-      leveldb::WriteOptions* options
-    , leveldb::Slice key
-    , leveldb::Slice value
-  );
-  leveldb::Status GetFromDatabase (
-      leveldb::ReadOptions* options
-    , leveldb::Slice key
-    , std::string& value
-  );
-  leveldb::Status DeleteFromDatabase (
-      leveldb::WriteOptions* options
-    , leveldb::Slice key
-  );
-  leveldb::Status WriteBatchToDatabase (
-      leveldb::WriteOptions* options
-    , leveldb::WriteBatch* batch
-  );
-  uint64_t ApproximateSizeFromDatabase (const leveldb::Range* range);
-  void CompactRangeFromDatabase (const leveldb::Slice* start, const leveldb::Slice* end);
-  void GetPropertyFromDatabase (const leveldb::Slice& property, std::string* value);
-  leveldb::Iterator* NewIterator (leveldb::ReadOptions* options);
-  const leveldb::Snapshot* NewSnapshot ();
-  void ReleaseSnapshot (const leveldb::Snapshot* snapshot);
-  void CloseDatabase ();
-  void ReleaseIterator (uint32_t id);
+  INIT_NAMED_CLASS_MEMBERS(Database, Database) {
+    int id = com->threadId;
+    JS_NEW_PERSISTENT_FUNCTION_TEMPLATE(jx_persistent.templates[id],
+                                        constructor);
 
-  Database (const v8::Local<v8::Value>& from);
-  ~Database ();
+    SET_INSTANCE_METHOD("open", Database::Open, 0);
+    SET_INSTANCE_METHOD("close", Database::Close, 0);
+    SET_INSTANCE_METHOD("put", Database::Put, 0);
+    SET_INSTANCE_METHOD("get", Database::Get, 0);
+    SET_INSTANCE_METHOD("del", Database::Delete, 0);
+    SET_INSTANCE_METHOD("batch", Database::Batch, 0);
+    SET_INSTANCE_METHOD("approximateSize", Database::ApproximateSize, 0);
+    SET_INSTANCE_METHOD("getProperty", Database::GetProperty, 0);
+    SET_INSTANCE_METHOD("iterator", Database::Iterator, 0);
+  }
+  END_INIT_NAMED_MEMBERS(Database)
 
-private:
-  Nan::Utf8String* location;
+  static JS_HANDLE_VALUE NewInstance(JS_LOCAL_STRING& location);
+
+  leveldb::Status OpenDatabase(leveldb::Options* options);
+  leveldb::Status PutToDatabase(leveldb::WriteOptions* options,
+                                leveldb::Slice key, leveldb::Slice value);
+  leveldb::Status GetFromDatabase(leveldb::ReadOptions* options,
+                                  leveldb::Slice key, std::string& value);
+  leveldb::Status DeleteFromDatabase(leveldb::WriteOptions* options,
+                                     leveldb::Slice key);
+  leveldb::Status WriteBatchToDatabase(leveldb::WriteOptions* options,
+                                       leveldb::WriteBatch* batch);
+  uint64_t ApproximateSizeFromDatabase(const leveldb::Range* range);
+  void GetPropertyFromDatabase(const leveldb::Slice& property,
+                               std::string* value);
+  leveldb::Iterator* NewIterator(leveldb::ReadOptions* options);
+  const leveldb::Snapshot* NewSnapshot();
+  void ReleaseSnapshot(const leveldb::Snapshot* snapshot);
+  void CloseDatabase();
+  void ReleaseIterator(uint32_t id);
+
+  Database(const JS_HANDLE_VALUE& from);
+  ~Database();
+
+ private:
+  jxcore::JXString location;
   leveldb::DB* db;
   uint32_t currentIteratorId;
   void(*pendingCloseWorker);
   leveldb::Cache* blockCache;
   const leveldb::FilterPolicy* filterPolicy;
 
-  std::map< uint32_t, leveldown::Iterator * > iterators;
+  std::map<uint32_t, leveldown::Iterator*> iterators;
 
-  static void WriteDoing(uv_work_t *req);
-  static void WriteAfter(uv_work_t *req);
+  static void WriteDoing(uv_work_t* req);
+  static void WriteAfter(uv_work_t* req);
 
-  static NAN_METHOD(New);
-  static NAN_METHOD(Open);
-  static NAN_METHOD(Close);
-  static NAN_METHOD(Put);
-  static NAN_METHOD(Delete);
-  static NAN_METHOD(Get);
-  static NAN_METHOD(Batch);
-  static NAN_METHOD(Write);
-  static NAN_METHOD(Iterator);
-  static NAN_METHOD(ApproximateSize);
-  static NAN_METHOD(CompactRange);
-  static NAN_METHOD(GetProperty);
+  static DEFINE_JS_METHOD(New);
+  static DEFINE_JS_METHOD(Open);
+  static DEFINE_JS_METHOD(Close);
+  static DEFINE_JS_METHOD(Put);
+  static DEFINE_JS_METHOD(Delete);
+  static DEFINE_JS_METHOD(Get);
+  static DEFINE_JS_METHOD(Batch);
+  static DEFINE_JS_METHOD(Write);
+  static DEFINE_JS_METHOD(Iterator);
+  static DEFINE_JS_METHOD(ApproximateSize);
+  static DEFINE_JS_METHOD(GetProperty);
 };
 
-} // namespace leveldown
+}  // namespace leveldown
 
+#endif
 #endif

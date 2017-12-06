@@ -1,4 +1,6 @@
-/* Copyright (c) 2012-2017 LevelDOWN contributors
+#if defined(JS_ENGINE_V8) or defined(JS_ENGINE_MOZJS) or \
+    defined(JS_ENGINE_CHAKRA)
+/* Copyright (c) 2012-2015 LevelDOWN contributors
  * See list at <https://github.com/level/leveldown#contributing>
  * MIT License <https://github.com/level/leveldown/blob/master/LICENSE.md>
  */
@@ -13,63 +15,73 @@
 
 namespace leveldown {
 
-NAN_METHOD(DestroyDB) {
-  Nan::HandleScope scope;
+JS_LOCAL_METHOD(DestroyDB) {
+  if (args.Length() < 2 || !args.IsString(0) || !args.IsFunction(1)) {
+    THROW_EXCEPTION("DestroyDB expects (string, function) parameters");
+  }
 
-  Nan::Utf8String* location = new Nan::Utf8String(info[0]);
+  jxcore::JXString location;
+  args.GetString(0, &location);
 
-  Nan::Callback* callback = new Nan::Callback(
-      v8::Local<v8::Function>::Cast(info[1]));
+  JS_LOCAL_FUNCTION fnc = JS_TYPE_TO_LOCAL_FUNCTION(args.GetAsFunction(1));
+  NanCallback* callback = new NanCallback(fnc);
 
-  DestroyWorker* worker = new DestroyWorker(
-      location
-    , callback
-  );
+  location.DisableAutoGC();
+  DestroyWorker* worker = new DestroyWorker(location, callback);
 
-  Nan::AsyncQueueWorker(worker);
+  NanAsyncQueueWorker(worker);
+}
+JS_METHOD_END
 
-  info.GetReturnValue().SetUndefined();
+JS_LOCAL_METHOD(RepairDB) {
+  if (args.Length() < 2 || !args.IsString(0) || !args.IsFunction(1)) {
+    THROW_EXCEPTION("repair() requires `location` and `callback` arguments");
+  }
+
+  jxcore::JXString location;
+  args.GetString(0, &location);
+
+  JS_LOCAL_FUNCTION fnc = JS_TYPE_TO_LOCAL_FUNCTION(args.GetAsFunction(1));
+  NanCallback* callback = new NanCallback(fnc);
+
+  location.DisableAutoGC();
+
+  RepairWorker* worker = new RepairWorker(location, callback);
+
+  NanAsyncQueueWorker(worker);
+}
+JS_METHOD_END
+
+class LeveldownWrap {
+ public:
+  static DEFINE_JS_METHOD(New);
+
+  INIT_NAMED_CLASS_MEMBERS(leveldown, LeveldownWrap) {
+    Database::Initialize(target);
+    leveldown::Iterator::Initialize(target);
+    leveldown::Batch::Initialize(target);
+
+    SET_CLASS_METHOD("repair", RepairDB, 0);
+    SET_CLASS_METHOD("destroy", DestroyDB, 0);
+  }
+  END_INIT_NAMED_MEMBERS(leveldown)
+};
+
+JS_METHOD(LeveldownWrap, New) {
+  JS_LOCAL_STRING location = JS_TYPE_TO_LOCAL_STRING(args.GetAsString(0));
+  RETURN_PARAM(Database::NewInstance(location));
+}
+JS_METHOD_END
+
+void RegisterModule(JS_HANDLE_OBJECT_REF target) {
+  JS_ENTER_SCOPE();
+
+  LeveldownWrap::Initialize(target);
 }
 
-NAN_METHOD(RepairDB) {
-  Nan::HandleScope scope;
+#ifndef JXCORE_EMBEDS_LEVELDOWN
+NODE_MODULE(leveldown, RegisterModule);
+#endif
 
-  Nan::Utf8String* location = new Nan::Utf8String(info[0]);
-
-  Nan::Callback* callback = new Nan::Callback(
-      v8::Local<v8::Function>::Cast(info[1]));
-
-  RepairWorker* worker = new RepairWorker(
-      location
-    , callback
-  );
-
-  Nan::AsyncQueueWorker(worker);
-
-  info.GetReturnValue().SetUndefined();
-}
-
-void Init (v8::Local<v8::Object> target) {
-  Database::Init();
-  leveldown::Iterator::Init();
-  leveldown::Batch::Init();
-
-  v8::Local<v8::Function> leveldown =
-      Nan::New<v8::FunctionTemplate>(LevelDOWN)->GetFunction();
-
-  leveldown->Set(
-      Nan::New("destroy").ToLocalChecked()
-    , Nan::New<v8::FunctionTemplate>(DestroyDB)->GetFunction()
-  );
-
-  leveldown->Set(
-      Nan::New("repair").ToLocalChecked()
-    , Nan::New<v8::FunctionTemplate>(RepairDB)->GetFunction()
-  );
-
-  target->Set(Nan::New("leveldown").ToLocalChecked(), leveldown);
-}
-
-NODE_MODULE(leveldown, Init)
-
-} // namespace leveldown
+}  // namespace leveldown
+#endif

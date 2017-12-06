@@ -1,6 +1,5 @@
 const util             = require('util')
     , AbstractIterator = require('abstract-leveldown').AbstractIterator
-    , fastFuture       = require('fast-future')
 
 
 function Iterator (db, options) {
@@ -9,26 +8,11 @@ function Iterator (db, options) {
   this.binding    = db.binding.iterator(options)
   this.cache      = null
   this.finished   = false
-  this.fastFuture = fastFuture()
+  this.fastFuture = require('fast-future')()
 }
 
 util.inherits(Iterator, AbstractIterator)
 
-Iterator.prototype.seek = function (target) {
-  if (this._ended)
-    throw new Error('cannot call seek() after end()')
-  if (this._nexting)
-    throw new Error('cannot call seek() before next() has completed')
-
-  if (typeof target !== 'string' && !Buffer.isBuffer(target))
-    throw new Error('seek() requires a string or buffer key')
-  if (target.length == 0)
-    throw new Error('cannot seek() to an empty key')
-
-  this.cache = null
-  this.binding.seek(target)
-  this.finished = false
-}
 
 Iterator.prototype._next = function (callback) {
   var that = this
